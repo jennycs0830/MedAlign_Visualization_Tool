@@ -1,0 +1,10 @@
+.cache_models/*
+.ipynb_checkpoints/*
+data_resources/*
+docs/*
+logs/*
+MedAlign/*
+physionet.org/*
+prompts/*
+src/*
+.env
