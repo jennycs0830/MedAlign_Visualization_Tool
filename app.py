@@ -3,11 +3,27 @@ import xmltodict
 import streamlit as st
 import pandas as pd
 from tqdm import tqdm
+import argparse
 
 # -----------------------------
 # Config
 # -----------------------------
-EHR_PATH = "MedAlign/medalign_instructions_v1_3/ehrs"
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--path",
+        type=str,
+        default="/Users/jennysun0830/Desktop/MedAlign",
+        help="Base path to MedAlign dataset"
+    )
+    args, _ = parser.parse_known_args()
+    return args
+
+if __name__ == "__main__":
+    args = parse_args()
+    EHR_PATH = os.path.join(args.path, "medalign_instructions_v1_3/ehrs")
+else:
+    EHR_PATH = "./medalign_instructions_v1_3/ehrs"
 
 # -----------------------------
 # Utility Functions
@@ -66,31 +82,42 @@ def search_keyword_in_file(filepath, keyword, attr):
                         "encounter_idx": encounter_idx,
                         "entry_idx": entry_idx,
                         "attribute": attr,
-                        "matched_value": str(text)[:200].replace("\n", " ") + "..."
+                        "matched_value": str(text)[:500].replace("\n", " ")
                     })
     return results
 
 
 # -----------------------------
-# Streamlit UI
+# Streamlit Layout Setup
 # -----------------------------
 st.set_page_config(page_title="MedAlign EHR Viewer", layout="wide")
-st.title("🩺 MedAlign EHR Timeline & Dataset Keyword Search")
 
-# Get list of files once
+# Add resizable CSS behavior for columns
+st.markdown("""
+<style>
+[data-testid="stHorizontalBlock"] > div:first-child {
+    resize: horizontal;
+    overflow: auto;
+    min-width: 400px;
+    max-width: 80%;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🩺 MedAlign EHR Visualization Tool")
+st.caption(f"Dataset path: `{EHR_PATH}`")
+
+# Get file list
+if not os.path.exists(EHR_PATH):
+    st.error(f"❌ Path not found: {EHR_PATH}")
+    st.stop()
+
 files = [f for f in os.listdir(EHR_PATH) if f.endswith(".xml")]
+if not files:
+    st.warning("No XML files found in the specified folder.")
+    st.stop()
 
-# ====================================================
-# 🌍 Global Keyword Search (Top Section)
-# ====================================================
-st.subheader("🌍 Global Keyword Search Across All Patients")
-
-# Select search attribute and keyword
-attributes = ["#text", "@type", "@visit_id", "@code", "@name"]
-attr = st.selectbox("Select attribute to search in:", attributes, index=0)
-keyword = st.text_input("Enter keyword to search for across all files:")
-
-# Initialize session state for persistent results
+# Initialize session state
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
 if "last_keyword" not in st.session_state:
@@ -98,103 +125,104 @@ if "last_keyword" not in st.session_state:
 if "last_attr" not in st.session_state:
     st.session_state.last_attr = None
 
-# Search button
-search_btn = st.button("🔍 Search Keyword")
+# -----------------------------
+# Split Page: Left / Right
+# -----------------------------
+left_col, right_col = st.columns([1.3, 1.7], gap="large")
 
-# Run search only when button pressed
-if search_btn and keyword.strip():
-    st.info(f"Searching for **'{keyword}'** in attribute **{attr}** across all EHR XML files... This may take a few seconds ⏳")
+# ====================================================
+# 🌍 LEFT: Global Keyword Search
+# ====================================================
+with left_col:
+    st.subheader("🌍 Global Keyword Search Across All Patients")
 
-    all_results = []
-    for f in tqdm(files, desc="Searching files"):
-        file_path = os.path.join(EHR_PATH, f)
-        all_results.extend(search_keyword_in_file(file_path, keyword, attr))
+    attributes = ["#text", "@type", "@visit_id", "@code", "@name"]
+    attr = st.selectbox("Select attribute to search in:", attributes, index=0)
+    keyword = st.text_input("Enter keyword to search for across all files:")
 
-    if all_results:
-        df_all = pd.DataFrame(all_results)
-        st.success(f"✅ Found {len(df_all)} matches for '{keyword}' in {attr} across {len(set(df_all['patient_id']))} patients.")
-        st.session_state.search_results = df_all
-        st.session_state.last_keyword = keyword
-        st.session_state.last_attr = attr
+    search_btn = st.button("🔍 Search Keyword")
+
+    if search_btn and keyword.strip():
+        st.info(f"Searching for **'{keyword}'** in **{attr}** across all EHR XML files... ⏳")
+        all_results = []
+        for f in tqdm(files, desc="Searching files"):
+            file_path = os.path.join(EHR_PATH, f)
+            all_results.extend(search_keyword_in_file(file_path, keyword, attr))
+
+        if all_results:
+            df_all = pd.DataFrame(all_results)
+            st.session_state.update({
+                "search_results": df_all,
+                "last_keyword": keyword,
+                "last_attr": attr
+            })
+            st.success(f"✅ Found {len(df_all)} matches across {len(set(df_all['patient_id']))} patients.")
+        else:
+            st.warning(f"No matches found for '{keyword}' in {attr}.")
+            st.session_state.search_results = None
+
+    if st.session_state.search_results is not None:
+        st.info(f"Showing results for **'{st.session_state.last_keyword}'** in **{st.session_state.last_attr}**.")
+        st.dataframe(st.session_state.search_results, use_container_width=True, height=650)
     else:
-        st.warning(f"No matches found for '{keyword}' in {attr} across dataset.")
-        st.session_state.search_results = None
-        st.session_state.last_keyword = keyword
-        st.session_state.last_attr = attr
+        st.caption("Enter a keyword and click **Search** to begin.")
 
-# Display previous results if no new search triggered
-elif st.session_state.search_results is not None:
-    last_kw = st.session_state.last_keyword
-    last_attr = st.session_state.last_attr
-    st.info(f"Showing previous search results for **'{last_kw}'** in **{last_attr}**.")
-    st.dataframe(st.session_state.search_results, use_container_width=True, height=500)
-
-else:
-    st.caption("Enter a keyword and click **Search** to begin.")
-
-st.divider()
 
 # ====================================================
-# 👤 Patient-Level Exploration
+# 👤 RIGHT: Patient-Level Exploration
 # ====================================================
-st.subheader("👤 Explore Individual Patient Files")
+with right_col:
+    st.subheader("👤 Explore Individual Patient Files")
 
-filename = st.sidebar.selectbox("Select patient file (for browsing)", files)
+    filename = st.selectbox("Select patient file (for browsing)", files)
 
-if filename:
-    data = load_xml(filename)
-    ehr_df = get_ehr_summary(data)
-    st.subheader("📋 EHR Overview (Encounters)")
-    st.dataframe(ehr_df, use_container_width=True)
+    if filename:
+        data = load_xml(filename)
+        ehr_df = get_ehr_summary(data)
+        st.dataframe(ehr_df, use_container_width=True, height=250)
 
-    # Encounter selection
-    encounter_idx = st.number_input("Select encounter index", 0, len(ehr_df) - 1, 0)
-    enc = data["eventstream"]["encounter"][encounter_idx]
-    entries = enc["events"]["entry"]
-    if not isinstance(entries, list):
-        entries = [entries]
+        encounter_idx = st.number_input("Select encounter index", 0, len(ehr_df) - 1, 0)
+        enc = data["eventstream"]["encounter"][encounter_idx]
+        entries = enc["events"]["entry"]
+        if not isinstance(entries, list):
+            entries = [entries]
 
-    # Entry summary
-    entry_summary = []
-    for i, e in enumerate(entries):
-        events = e.get("event", [])
-        if not isinstance(events, list):
-            events = [events]
-        first_event = events[0] if events else {}
-        entry_summary.append({
-            "entry_index": i,
-            "note_count": len(events),
-            "main_type": first_event.get("@type", "N/A"),
-            "main_code": first_event.get("@code", "N/A")
-        })
+        entry_summary = []
+        for i, e in enumerate(entries):
+            events = e.get("event", [])
+            if not isinstance(events, list):
+                events = [events]
+            entry_summary.append({
+                "entry_index": i,
+                "note_count": len(events),
+            })
 
-    entry_df = pd.DataFrame(entry_summary)
+        entry_df = pd.DataFrame(entry_summary)
+        st.dataframe(entry_df, use_container_width=True, height=250)
 
-    entry_idx = st.number_input("Select entry index", 0, len(entry_df) - 1, 0)
-    selected_entry = entries[entry_idx]
-    notes = selected_entry.get("event", [])
-    if not isinstance(notes, list):
-        notes = [notes]
+        entry_idx = st.number_input("Select entry index", 0, len(entry_df) - 1, 0)
+        selected_entry = entries[entry_idx]
+        notes = selected_entry.get("event", [])
+        if not isinstance(notes, list):
+            notes = [notes]
 
-    # Notes table
-    note_table = []
-    for j, n in enumerate(notes):
-        note_table.append({
-            "note_index": j,
-            "type": n.get("@type", "N/A"),
-            "code": n.get("@code", "N/A"),
-            "snippet": n.get("#text", "")
-        })
+        note_table = []
+        for j, n in enumerate(notes):
+            note_table.append({
+                "note_index": j,
+                "type": n.get("@type", "N/A"),
+                "code": n.get("@code", "N/A"),
+                "snippet": n.get("#text", "")[:500]
+            })
 
-    st.subheader(f"🧾 Notes in Entry #{entry_idx}")
-    note_df = pd.DataFrame(note_table)
-    st.dataframe(note_df, use_container_width=True, height=300)
+        note_df = pd.DataFrame(note_table)
+        st.subheader(f"🧾 Notes in Entry #{entry_idx}")
+        st.dataframe(note_df, use_container_width=True, height=250)
 
-    # Note text viewer
-    note_idx = st.number_input("Select note index", 0, len(note_df) - 1, 0)
-    selected_note = notes[note_idx]
-    note_text = selected_note.get("#text", "")
+        note_idx = st.number_input("Select note index", 0, len(note_df) - 1, 0)
+        selected_note = notes[note_idx]
+        note_text = selected_note.get("#text", "")
 
-    if note_text:
-        st.subheader("📝 Note Text")
-        st.text_area("Note", note_text, height=300)
+        if note_text:
+            st.subheader("📝 Note Text")
+            st.text_area("Note", note_text, height=300)

@@ -25,8 +25,8 @@ The **MedAlign** dataset can be downloaded from the Stanford Shah Lab repository
 ## Installation
 ### 1. Clone this Repository
 ```bash
-git clone https://github.com/jennycs0830/I-DocAssist.git
-cd I-DocAssist
+git clone https://github.com/jennycs0830/MedAlign_Visualization_Tool.git
+cd MedAlign_Visualization_Tool
 ```
 
 ### 2. Create an Environment
@@ -43,6 +43,6 @@ pip install -r requirements.txt
 ## Run the App
 Launch the streamlit app locally
 ```bash
-streamlit run app.py
+streamlit run app.py --path [your MedAlign dataset path]
 ```
 Once started, open the URL shown in your terminal (usually http://localhost:8501￼).
