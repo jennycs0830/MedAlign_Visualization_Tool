@@ -4,6 +4,8 @@ import streamlit as st
 import pandas as pd
 from tqdm import tqdm
 import argparse
+import json
+from collections import defaultdict
 
 # -----------------------------
 # Config
@@ -24,6 +26,7 @@ if __name__ == "__main__":
     EHR_PATH = os.path.join(args.path, "medalign_instructions_v1_3/ehrs")
 else:
     EHR_PATH = "./medalign_instructions_v1_3/ehrs"
+
 
 # -----------------------------
 # Utility Functions
@@ -82,9 +85,45 @@ def search_keyword_in_file(filepath, keyword, attr):
                         "encounter_idx": encounter_idx,
                         "entry_idx": entry_idx,
                         "attribute": attr,
-                        "matched_value": str(text)[:500].replace("\n", " ")
+                        "matched_value": str(text)
                     })
     return results
+
+
+def collect_unique_values(ehr_path, files, attributes):
+    """
+    Collect all unique values for each selected attribute across all XML files.
+    Returns a dict: {attribute_name: set(values)}.
+    """
+    unique_values = defaultdict(set)
+
+    for f in tqdm(files, desc="Collecting unique values"):
+        file_path = os.path.join(ehr_path, f)
+        try:
+            with open(file_path, "r") as xml_file:
+                data = xmltodict.parse(xml_file.read())
+        except Exception:
+            continue
+
+        encounters = data.get("eventstream", {}).get("encounter", [])
+        if not isinstance(encounters, list):
+            encounters = [encounters]
+
+        for encounter in encounters:
+            entries = encounter.get("events", {}).get("entry", [])
+            if not isinstance(entries, list):
+                entries = [entries]
+            for entry in entries:
+                events = entry.get("event", [])
+                if not isinstance(events, list):
+                    events = [events]
+                for event in events:
+                    for attr in attributes:
+                        val = event.get(attr, None)
+                        if val:
+                            unique_values[attr].add(str(val).strip())
+
+    return {k: list(v) for k, v in unique_values.items()}
 
 
 # -----------------------------
@@ -168,6 +207,43 @@ with left_col:
         st.caption("Enter a keyword and click **Search** to begin.")
 
 
+    # ====================================================
+    # 🧩 Collect Unique Attribute Values
+    # ====================================================
+    st.divider()
+    st.subheader("🧩 Collect Unique Attribute Values")
+
+    st.caption("Extract all unique values from selected attributes across the entire dataset.")
+
+    attributes_to_collect = st.multiselect(
+        "Select attributes to collect unique values for:",
+        ["#text", "@type", "@visit_id", "@code", "@name"],
+        default=["@type", "@code", "@name"]
+    )
+
+    collect_btn = st.button("📊 Collect and Save Unique Values")
+
+    if collect_btn:
+        st.info("Collecting unique attribute values... This may take a few minutes ⏳")
+        unique_dict = collect_unique_values(EHR_PATH, files, attributes_to_collect)
+
+        # Save results
+        save_path_json = os.path.join(EHR_PATH, "unique_values_summary.json")
+        save_path_csv = os.path.join(EHR_PATH, "unique_values_summary.csv")
+
+        # Save JSON
+        with open(save_path_json, "w") as jf:
+            json.dump(unique_dict, jf, indent=2, ensure_ascii=False)
+
+        # Save flattened CSV (attribute,value)
+        flat_rows = []
+        for attr, values in unique_dict.items():
+            for v in values:
+                flat_rows.append({"attribute": attr, "value": v})
+
+        st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, height=400)
+
+
 # ====================================================
 # 👤 RIGHT: Patient-Level Exploration
 # ====================================================
@@ -212,7 +288,7 @@ with right_col:
                 "note_index": j,
                 "type": n.get("@type", "N/A"),
                 "code": n.get("@code", "N/A"),
-                "snippet": n.get("#text", "")[:500]
+                "snippet": n.get("#text", "")
             })
 
         note_df = pd.DataFrame(note_table)
